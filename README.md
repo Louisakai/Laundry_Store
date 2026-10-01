@@ -133,8 +133,3 @@ npm run web
 - `EXPO_PUBLIC_API_URL`: địa chỉ backend có thể truy cập từ thiết bị
 - `EXPO_PUBLIC_MAPVINA_API_KEY`: khóa MapVina
 
-## Git và dữ liệu nhạy cảm
-
-`.gitignore` ở thư mục gốc loại các dependency, file môi trường thật, log, coverage, thư mục build và file sinh ra bởi Expo/Android. Các file mẫu `.env.example`, source code, Prisma migration và package manifest vẫn được lưu trong repository.
-
-Thư mục `.agents/` và `docs/` chỉ dùng cho workspace cục bộ, không được đưa lên repository GitHub.
