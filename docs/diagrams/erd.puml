@@ -1,0 +1,184 @@
+@startuml erd-laundry
+'#################################################
+' NIMBLE — ERD (Entity Relationship Diagram)
+' DỰA THEO code thực tế: prisma/schema.prisma
+'   + migrations/20260619032453_init
+'   + migrations/20260621091930_add_drop_off_type
+' 9 models · 7 enums · PostgreSQL (Supabase)
+' Tên lớp = tên bảng thật trong DB.
+'#################################################
+
+hide circle
+hide empty members
+left to right direction
+
+skinparam class {
+  BackgroundColor #EAF7F7
+  BorderColor #0A7B7B
+  HeaderBackgroundColor #0A7B7B
+  FontColor #0A3550
+  ArrowColor #0A7B7B
+}
+skinparam classAttributeIconSize 0
+skinparam nodesep 40
+skinparam ranksep 60
+
+class "users" as User {
+  + id *PK*
+  + email *UK*
+  + passwordHash
+  + fullName
+  + phone
+  + role : Role
+  + staffType? : StaffType
+  + preferences? : Json
+  + workZone? : String
+  + isAvailable? : Boolean
+  + currentLat? / currentLng? : Float
+  + locationUpdatedAt? : DateTime
+  + created_at / updated_at
+}
+
+class "addresses" as Address {
+  + id *PK*
+  + user_id *FK*
+  + label
+  + addressLine
+  + latitude / longitude
+  + isDefault
+  + created_at
+}
+
+class "services" as Service {
+  + id *PK*
+  + name
+  + description?
+  + pricePerUnit
+  + unit : "kg / cái / đôi"
+  + isActive
+  + created_at / updated_at
+}
+
+class "orders" as Order {
+  + id *PK*
+  + customer_id *FK*
+  + staff_id? *FK*
+  + pickup_address_id? *FK*
+  + delivery_address_id? *FK*
+  + status : OrderStatus
+  + totalPrice
+  + orderType : OrderType
+  + notes?
+  + pickup/deliveryWindowStart?/End?
+  + pickup/deliveryContactName?/Phone?
+  + cancellationReason?
+  + paymentMethod : PaymentProvider
+  + paymentStatus : PaymentStatus
+  + created_at / updated_at
+}
+
+class "order_items" as OrderItem {
+  + id *PK*
+  + order_id *FK*
+  + service_id *FK*
+  + quantity? : Float
+  + price (snapshot)
+  + subtotal?
+  + created_at
+}
+
+class "order_tracking_logs" as OrderTrackingLog {
+  + id *PK*
+  + order_id *FK*
+  + changed_by *FK*
+  + status : OrderStatus
+  + note?
+  + created_at
+}
+
+class "reviews" as Review {
+  + id *PK*
+  + order_id *UK FK*  (1-1)
+  + customer_id *FK*
+  + staff_id? *FK*
+  + serviceRating : 1-5
+  + serviceComment?
+  + shipperRating?
+  + shipperComment?
+  + created_at / updated_at
+}
+
+class "notifications" as Notification {
+  + id *PK*
+  + user_id *FK*
+  + title
+  + content
+  + isRead
+  + type : NotificationType
+  + relatedId? (orderId để redirect)
+  + created_at
+}
+
+class "payments" as Payment {
+  + id *PK*
+  + order_id *FK*
+  + provider : PaymentProvider
+  + amount
+  + status : PaymentStatus
+  + providerRef? *UK*
+  + providerPayload? : Json
+  + paidAt?
+  + created_at / updated_at
+}
+
+' ===== Quan hệ =====
+
+User "1" -- "N" Address : "địa chỉ (user_id)"
+
+User "1" o-- "N" Order : "ordersAsCustomer\n(customer_id)"
+User "0..1" o-- "N" Order : "ordersAsStaff\n(staff_id)"
+
+Address "0..1" )-- "N" Order : "ordersAsPickup\n(pickup_address_id)"
+Address "0..1" )-- "N" Order : "ordersAsDelivery\n(delivery_address_id)"
+
+Service "1" -- "N" OrderItem : "dịch vụ (service_id)"
+
+Order "1" -- "N" OrderItem : "order_items (order_id)"
+Order "1" -- "N" OrderTrackingLog : "lịch sử trạng thái"
+Order "1" -- "N" Payment : "thanh toán"
+Order "1" -- "0..1" Review : "đánh giá (order_id UK)"
+
+User "1" -- "N" OrderTrackingLog : "changed_by (ai cập nhật)"
+User "1" -- "N" Notification : "nhận thông báo"
+User "1" -- "N" Review : "reviewsAsCustomer"
+User "0..1" -- "N" Review : "reviewsAsStaff"
+
+' ===== Enum =====
+
+note bottom of User
+  **Enums:**
+  Role: CUSTOMER | STAFF | ADMIN
+  StaffType: WASHER | SHIPPER
+end note
+
+note bottom of Order
+  **OrderStatus:**
+  PENDING → CONFIRMED → PICKING_UP → RECEIVED
+  → PROCESSING → COMPLETED → DELIVERING
+  → DELIVERED | CANCELLED
+
+  **OrderType:** ONLINE | WALKIN | DROP_OFF
+  **PaymentProvider:** CASH | PAYOS
+end note
+
+note bottom of Payment
+  **PaymentStatus:**
+  PENDING | SUCCESS | FAILED | REFUNDED
+end note
+
+note bottom of Notification
+  **NotificationType:**
+  ORDER_STATUS | PAYMENT | PROMOTION | SYSTEM
+end note
+
+@enduml

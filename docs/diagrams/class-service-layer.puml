@@ -1,0 +1,138 @@
+@startuml class-service-layer
+'#################################################
+' NIMBLE — Class Diagram: Service layer (tinh giản)
+' Services + Infra.
+'#################################################
+
+hide circle
+skinparam class {
+  BackgroundColor #EAF7F7
+  BorderColor #0A7B7B
+  ArrowColor #0A7B7B
+}
+skinparam classHeaderBackgroundColor #0A7B7B
+skinparam classFontColor #0A3550
+skinparam interfaceBackgroundColor #F3FAFA
+skinparam interfaceBorderColor #0A7B7B
+skinparam defaultFontSize 14
+
+title Class diagram — Service layer (NIMBLE)
+
+class AuthService {
+  prisma : PrismaService
+  jwtService : JwtService
+  --
+  register / login / refreshToken
+  getProfile / changePassword
+  -generateTokens()
+}
+class OrderService {
+  prisma : PrismaService
+  eventEmitter : EventEmitter2
+  paymentService : PaymentService
+  -VALID_TRANSITIONS
+  -ORDER_TYPE_FLOWS
+  --
+  create / cancel / updateStatus
+  weighOrder / autoAssignShipper
+  assignStaff / completeDelivery
+  confirmPayment
+  -haversine()
+}
+class PaymentService {
+  prisma : PrismaService
+  eventEmitter : EventEmitter2
+  --
+  processPayment
+  verifyAndProcessWebhook
+}
+class ReviewService {
+  prisma : PrismaService
+  --
+  create / findByOrder / findByStaff
+}
+class StaffService {
+  prisma : PrismaService
+  eventEmitter : EventEmitter2
+  --
+  CRUD / getMyOrders
+  updateLocation / setLocationToStore
+  toggleAvailability
+}
+class AdminService {
+  prisma : PrismaService
+  --
+  getOrders / getStats / getRevenue
+  getAnalyticsOrders / getStaffAnalytics
+  getDailyRevenue / getServiceAnalytics
+  updateOrderServices / updateOrderPrice
+}
+class NotificationService {
+  prisma : PrismaService
+  --
+  findAll / markAsRead / markAllAsRead
+}
+class AddressService {
+  prisma : PrismaService
+  --
+  CRUD / setDefault
+}
+class ServiceService {
+  prisma : PrismaService
+  --
+  CRUD (soft-delete)
+}
+class OsmService <<OnModuleInit>> {
+  graph : GraphData | null
+  --
+  onModuleInit / loadGraph
+  shortestPath
+}
+class RouteService {
+  prisma : PrismaService
+  osmService : OsmService (forwardRef)
+  --
+  optimize / nearestShipper / navigate
+}
+
+class PrismaService <<PrismaClient>> {
+  $transaction(fn) + các model
+}
+class EventEmitter2 <<Event>> {
+  emit / on
+}
+class JwtService <<@nestjs/jwt>> {
+  sign / verify
+}
+
+' Ép layout: 2-3 cột dọc
+AuthService -[hidden]down- OrderService
+OrderService -[hidden]down- PaymentService
+PaymentService -[hidden]down- ReviewService
+ReviewService -[hidden]down- StaffService
+AdminService -[hidden]down- NotificationService
+NotificationService -[hidden]down- AddressService
+AddressService -[hidden]down- ServiceService
+ServiceService -[hidden]down- OsmService
+OsmService -[hidden]down- RouteService
+
+' Service phụ thuộc Prisma + sự kiện
+AuthService --> PrismaService
+AuthService --> JwtService : tạo token
+OrderService --> PrismaService
+OrderService --> PaymentService
+OrderService ..> EventEmitter2 : status-changed / assigned
+PaymentService --> PrismaService
+PaymentService ..> EventEmitter2
+ReviewService --> PrismaService
+StaffService --> PrismaService
+StaffService ..> EventEmitter2 : location-updated
+AdminService --> PrismaService
+NotificationService --> PrismaService
+AddressService --> PrismaService
+ServiceService --> PrismaService
+OsmService --> PrismaService
+RouteService --> PrismaService
+RouteService --> OsmService : shortestPath()
+
+@enduml

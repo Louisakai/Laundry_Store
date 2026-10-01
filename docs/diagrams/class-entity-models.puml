@@ -1,0 +1,212 @@
+@startuml class-entity-models
+'#################################################
+' NIMBLE — Class Diagram: Entity Models (Prisma schema)
+' 9 model thực thể, đúng field trong prisma/schema.prisma
+'#################################################
+
+hide circle
+skinparam class {
+  BackgroundColor #EAF7F7
+  BorderColor #0A7B7B
+  ArrowColor #0A7B7B
+}
+skinparam classHeaderBackgroundColor #0A7B7B
+skinparam classFontColor #0A3550
+
+title Class diagram — Entity models NIMBLE (Prisma)
+
+class User <<users>> {
+  -id : string <<PK>>
+  -email : string <<unique>>
+  -passwordHash : string
+  -fullName : string
+  -phone : string
+  -role : Role <<CUSTOMER/STAFF/ADMIN>>
+  -staffType : StaffType?
+  -preferences : Json?
+  -workZone : string?
+  -isAvailable : boolean?
+  -currentLat : float?
+  -currentLng : float?
+  -locationUpdatedAt : DateTime?
+  -createdAt : DateTime
+  -updatedAt : DateTime
+}
+class Address <<addresses>> {
+  -id : string <<PK>>
+  -userId : string <<FK→User>>
+  -label : string
+  -addressLine : string
+  -latitude : float
+  -longitude : float
+  -isDefault : boolean
+  -createdAt : DateTime
+}
+class Service <<services>> {
+  -id : string <<PK>>
+  -name : string
+  -description : string?
+  -pricePerUnit : float
+  -unit : string <<"kg","cái","đôi">>
+  -isActive : boolean
+  -createdAt : DateTime
+  -updatedAt : DateTime
+}
+class Order <<orders>> {
+  -id : string <<PK>>
+  -customerId : string <<FK→User>>
+  -staffId : string? <<FK→User>>
+  -pickupAddressId : string?
+  -deliveryAddressId : string?
+  -status : OrderStatus <<PENDING...DELIVERED>>
+  -totalPrice : float
+  -orderType : OrderType <<ONLINE/WALKIN/DROP_OFF>>
+  -notes : string?
+  -pickupWindowStart/End : DateTime?
+  -deliveryWindowStart/End : DateTime?
+  -pickupContactName/Phone : string?
+  -deliveryContactName/Phone : string?
+  -cancellationReason : string?
+  -paymentMethod : PaymentProvider <<CASH/PAYOS>>
+  -paymentStatus : PaymentStatus <<PENDING/SUCCESS/FAILED/REFUNDED>>
+  -createdAt : DateTime
+  -updatedAt : DateTime
+}
+class OrderItem <<order_items>> {
+  -id : string <<PK>>
+  -orderId : string <<FK→Order>>
+  -serviceId : string <<FK→Service>>
+  -quantity : float?
+  -price : float <<snapshot giá Service>>
+  -subtotal : float?
+  -createdAt : DateTime
+}
+class OrderTrackingLog <<order_tracking_logs>> {
+  -id : string <<PK>>
+  -orderId : string <<FK→Order>>
+  -changedBy : string <<FK→User>>
+  -status : OrderStatus
+  -note : string?
+  -createdAt : DateTime
+}
+class Review <<reviews>> {
+  -id : string <<PK>>
+  -orderId : string <<FK→Order, unique 1-1>>
+  -customerId : string <<FK→User>>
+  -staffId : string?
+  -serviceRating : int <<1-5>>
+  -serviceComment : string?
+  -shipperRating : int?
+  -shipperComment : string?
+  -createdAt : DateTime
+  -updatedAt : DateTime
+}
+class Notification <<notifications>> {
+  -id : string <<PK>>
+  -userId : string <<FK→User>>
+  -title : string
+  -content : string
+  -isRead : boolean
+  -type : NotificationType <<ORDER_STATUS/PAYMENT/PROMOTION/SYSTEM>>
+  -relatedId : string?
+  -createdAt : DateTime
+}
+class Payment <<payments>> {
+  -id : string <<PK>>
+  -orderId : string <<FK→Order>>
+  -provider : PaymentProvider
+  -amount : float
+  -status : PaymentStatus
+  -providerRef : string? <<unique>>
+  -providerPayload : Json?
+  -paidAt : DateTime?
+  -createdAt : DateTime
+  -updatedAt : DateTime
+}
+
+' =================== ENUM REFERENCE ===================
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PICKING_UP
+  RECEIVED
+  PROCESSING
+  COMPLETED
+  DELIVERING
+  DELIVERED
+  CANCELLED
+}
+enum OrderType {
+  ONLINE
+  WALKIN
+  DROP_OFF
+}
+enum PaymentProvider {
+  CASH
+  PAYOS
+}
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+enum Role {
+  CUSTOMER
+  STAFF
+  ADMIN
+}
+enum StaffType {
+  WASHER
+  SHIPPER
+}
+enum NotificationType {
+  ORDER_STATUS
+  PAYMENT
+  PROMOTION
+  SYSTEM
+}
+
+' =================== QUAN HỆ (1–n) ===================
+
+User "1" --> "0..*" Address
+User "1" --> "0..*" Order : khách đặt
+User "1" --> "0..*" Order : staff phục vụ
+User "1" --> "0..*" Notification
+User "1" --> "0..*" Review : khách đánh giá
+User "1" --> "0..*" OrderTrackingLog : người cập nhật
+Order "1" --> "0..*" OrderItem
+Order "1" --> "0..*" OrderTrackingLog
+Order "1" --> "0..*" Payment
+Order "1" o-- "0..1" Review
+Address "1" --> "0..*" Order : pickupAddress (lấy đồ)
+Address "1" --> "0..*" Order : deliveryAddress (giao đồ)
+Service "1" --> "0..*" OrderItem
+
+' =================== GHI CHÚ ===================
+
+note bottom of Order
+  Order.status đi theo VALID_TRANSITIONS + ORDER_TYPE_FLOWS
+  (9 trạng thái x 3 loại đơn ONLINE/WALKIN/DROP_OFF).
+  Payment chỉ được tạo khi đơn COMPLETED/DELIVERING.
+end note
+
+note bottom of OrderItem
+  "Đặt trước, cân sau": khi tạo đơn ONLINE, quantity = null
+  và được điền khi nhân viên cân đồ (weighOrder) — quantity
+  là khối lượng THỰC TẾ sau khi cân, subtotal = quantity × price.
+end note
+
+note bottom of Payment
+  PAYOS webhook: PAID → payment SUCCESS + order DELIVERED;
+  CANCELLED → payment FAILED. Chưa có endpoint REFUNDED.
+end note
+
+note bottom of Review
+  Khóa unique Order.review (1 đơn chỉ 1 review).
+  Chỉ đơn DELIVERED mới review được;
+  WALKIN không có shipperRating (staff là washer).
+end note
+
+@enduml

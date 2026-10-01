@@ -1,0 +1,67 @@
+@startuml seq-review
+'#################################################
+' NIMBLE — Sequence 4: Đánh giá sau khi giao hàng
+' DỰA THEO code thực tế: src/review/review.service.ts
+'#################################################
+
+skinparam lifelineStrategy solid
+skinparam ParticipantPadding 20
+skinparam BoxPadding 10
+title Luồng 4: Khách đánh giá đơn hoàn thành
+
+actor "Khách hàng" as Customer
+participant "App Mobile" as Mobile
+participant "API Backend\n(NestJS)" as Backend
+database "PostgreSQL\n(Supabase)" as DB
+actor "Staff" as Staff
+
+activate Backend
+
+== Điều kiện: đơn đã DELIVERED ==
+
+Customer -> Mobile: Mở chi tiết đơn (status=DELIVERED) → bấm đánh giá
+Mobile -> Backend: POST /orders/:id/review
+note right
+  payload: serviceRating (1-5), serviceComment?,
+           shipperRating?, shipperComment?
+end note
+
+Backend -> DB: SELECT orders (+review, includes staff_id)
+DB --> Backend: order
+
+alt Pass các ràng buộc
+  note right
+    ✅ order.status == DELIVERED
+    ✅ order.customer_id == userId
+    ✅ chưa có review (order.review == null)
+    ✅ WALKIN không gửi shipperRating
+  end note
+  Backend -> DB: INSERT reviews (order_id, customer_id, staff_id=order.staff_id, ratings)
+  DB --> Backend: ok
+  Backend --> Mobile: 201 { review }
+  Mobile --> Customer: "Cảm ơn bạn đã đánh giá"
+else Vi phạm ràng buộc
+  note right
+    ❌ đơn chưa giao / không phải chủ đơn
+    ❌ đã đánh giá rồi ("Đơn hàng đã được đánh giá")
+    ❌ WALKIN + shipperRating != null ("không có shipper")
+  end note
+  Backend --> Mobile: 400/403/404 { message }
+  Mobile --> Customer: Hiển thị lỗi
+end
+
+== Xem đánh giá ==
+
+alt Khách / staff xem đánh giá của 1 đơn
+  Customer -> Backend: GET /orders/:id/review
+  Backend -> DB: SELECT reviews WHERE order_id
+  Backend --> Customer: 200 { review } (404 nếu chưa review)
+else Staff xem đánh giá nhận được
+  Staff -> Backend: GET /reviews/staff/:staffId
+  Backend -> DB: SELECT reviews WHERE staff_id (mới nhất, kèm order)
+  Backend --> Staff: 200 { reviews[] }
+end
+
+deactivate Backend
+
+@enduml

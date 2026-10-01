@@ -1,0 +1,153 @@
+@startuml class-api-layer
+'#################################################
+' NIMBLE — Class Diagram: API layer (tinh giản)
+' Controllers + Guards + Gateway + DTOs.
+'#################################################
+
+hide circle
+skinparam class {
+  BackgroundColor #EAF7F7
+  BorderColor #0A7B7B
+  ArrowColor #0A7B7B
+}
+skinparam classHeaderBackgroundColor #0A7B7B
+skinparam classFontColor #0A3550
+skinparam interfaceBackgroundColor #F3FAFA
+skinparam interfaceBorderColor #0A7B7B
+skinparam defaultFontSize 14
+
+title Class diagram — API layer (NIMBLE)
+
+class AuthController {
+  authService : AuthService
+  --
+  login / register / refresh
+  me / change-password
+}
+class AddressController {
+  addressService : AddressService
+  --
+  CRUD + setDefault
+}
+class OrderController {
+  orderService : OrderService
+  --
+  findAll / findOne / create
+  cancel / assign / auto-assign
+  status / weigh / complete-delivery
+  confirm-payment
+}
+class PaymentController {
+  paymentService : PaymentService
+  --
+  GET/POST payos-webhook
+}
+class PayController {
+  prisma : PrismaService
+  --
+  :id (trang QR), :id/confirm
+}
+class ReviewController {
+  reviewService : ReviewService
+  --
+  POST/GET orders/:id/review
+  GET reviews/staff/:staffId
+}
+class StaffController {
+  staffService : StaffService
+  --
+  CRUD staff, staff/orders
+  location (-/store), availability
+}
+class AdminController {
+  adminService : AdminService
+  --
+  orders / stats
+  analytics/revenue, orders, staff, services
+  PATCH orders/:id/services, /price
+}
+class NotificationController {
+  notificationService : NotificationService
+  --
+  GET (), PATCH :id/read, read-all
+}
+class ServiceController {
+  serviceService : ServiceService
+  --
+  CRUD dịch vụ
+}
+class OsmController {
+  osmService : OsmService
+  --
+  shortest-path, status
+}
+class RouteController {
+  routeService : RouteService
+  --
+  optimize / nearest-shipper / navigate
+}
+
+class JwtAuthGuard <<Guard>> {
+  AuthGuard('jwt')
+  -- xác minh token JWT
+  nạp req.user; lỗi → 401
+}
+class RolesGuard <<Guard>> {
+  @Roles(...) từ handler
+  -- so user.role → cho qua / 403
+}
+class JwtStrategy <<Strategy>> {}
+class RolesDecorator <<Decorator>> {
+  @Roles('CUSTOMER'|'STAFF'|'ADMIN')
+}
+class OrderTrackingGateway <<WebSocket>> {
+  namespace /orders
+  -- join-order/leave-order
+  order.status-changed → order-{id}
+  order.assigned → staff-{staffId}
+  staff.location-updated
+}
+
+class CreateOrderDto {}
+class UpdateOrderStatusDto {}
+class WeighOrderDto {}
+class CreateReviewDto {}
+class LoginDto {}
+class RegisterDto {}
+class CreateAddressDto {}
+class CreateServiceDto {}
+
+' Ép layout: controller thành 2-3 cột dọc
+AuthController -[hidden]down- AddressController
+AddressController -[hidden]down- OrderController
+OrderController -[hidden]down- PaymentController
+PaymentController -[hidden]down- PayController
+PayController -[hidden]down- ReviewController
+StaffController -[hidden]down- AdminController
+AdminController -[hidden]down- NotificationController
+NotificationController -[hidden]down- ServiceController
+ServiceController -[hidden]down- OsmController
+OsmController -[hidden]down- RouteController
+JwtAuthGuard -[hidden]down- RolesGuard
+RolesGuard -[hidden]down- JwtStrategy
+JwtStrategy -[hidden]down- RolesDecorator
+OrderTrackingGateway -[hidden]down- CreateOrderDto
+CreateOrderDto -[hidden]down- UpdateOrderStatusDto
+UpdateOrderStatusDto -[hidden]down- WeighOrderDto
+LoginDto -[hidden]down- RegisterDto
+
+' Guards bảo vệ Controller
+JwtAuthGuard ..> OrderController : bảo vệ các route
+RolesGuard ..> AdminController : @Roles('ADMIN')
+RolesGuard ..> StaffController
+
+' DTO → Controller
+OrderController ..> CreateOrderDto
+OrderController ..> UpdateOrderStatusDto
+AuthController ..> LoginDto
+AuthController ..> RegisterDto
+AddressController ..> CreateAddressDto
+ReviewController ..> CreateReviewDto
+OrderController ..> WeighOrderDto
+
+@enduml

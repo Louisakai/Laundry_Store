@@ -1,0 +1,119 @@
+@startuml activity-order-flow
+'#################################################
+' NIMBLE — Activity Diagram: Quy trình xử lý một đơn hàng
+' DỰA THEO code: order.service.ts, payment.service.ts,
+'   review.service.ts, websocket gateway, staff.service
+' Swimlane = actor thực hiện hành động.
+' Ghi chú = loại đơn (ONLINE/WALKIN/DROP_OFF) ảnh hưởng luồng.
+'#################################################
+
+skinparam activity {
+  BackgroundColor #EAF7F7
+  BorderColor #0A7B7B
+  DiamondBackgroundColor #FFF8E1
+  ArrowColor #0A7B7B
+}
+skinparam swimlane {
+  BackgroundColor #F3FAFA
+  BorderColor #0A7B7B
+  TitleBackgroundColor #0A7B7B
+}
+skinparam noteBackgroundColor #FFF8E1
+skinparam noteBorderColor #F0A202
+
+title Quy trình xử lý đơn hàng — NIMBLE
+
+|Khách hàng|
+start
+:Đăng nhập / mở app;
+:Chọn dịch vụ, địa chỉ,\nkhung giờ nhận/trả;
+
+note right
+  ONLINE: cần pickup & delivery address + windows
+  DROP_OFF: chỉ cần delivery address
+  WALKIN: không cần địa chỉ
+end note
+
+:Gửi yêu cầu tạo đơn\nPOST /orders;
+
+|Hệ thống (Backend)|
+:Validate DTO\n(địa chỉ, khung giờ ≥6h, ≤22h);
+if (Hợp lệ?) then (không)
+  :Trả lỗi 400\nthông báo cho khách;
+  stop
+else (có)
+  :Snapshot giá service → orderItems;\nINSERT orders (status=PENDING, totalPrice=0);\nINSERT order_tracking_logs (PENDING);
+endif
+
+if (Loại đơn?) then (ONLINE)
+  :Tự gán washer khả dụng\n(staff_id = washer);
+elseif (WALKIN / DROP_OFF) then
+  if (Người tạo là washer?) then (có)
+    :staff_id = userId;
+  else (không)
+    :staff_id = null;
+  endif
+endif
+
+:Trả về 201 { orderId, status: PENDING };
+-> Khách: "Đơn đã tạo, chờ xác nhận";
+
+|Staff / Admin|
+if (Loại đơn ONLINE/DROP_OFF?) then (có)
+  :Xác nhận đơn\nPATCH /orders/:id/status {CONFIRMED};
+  :Gán shipper + tự chuyển PICKING_UP\n(auto-assign hoặc PATCH /assign);
+  |Shipper|
+  :Shipper nhận đồ tại nhà khách\nPATCH .../status {RECEIVED};
+      if (Cân ngay được?) then (có)
+    :(cân tại quầy sau khi về tiệm)
+  else (không)
+  endif
+else (WALKIN — không cần xác nhận/pickup)
+endif
+
+|Staff / Washer|
+:Đồ về tiệm → cân đơn\nPATCH /orders/:id/weigh\n(khai báo quantity cho từng mục);
+
+:Backend tính totalPrice = Σ(qty × price);\nstatus → RECEIVED (nếu chưa);
+
+:Washer giặt\nPATCH .../status {PROCESSING};
+:FINISH giặt\nPATCH .../status {COMPLETED};
+
+if (Loại đơn ONLINE/DROP_OFF?) then (có)
+  if (Đã có shipper?) then (có)
+  else (chưa)
+    :Auto-assign shipper;
+  endif
+  |Shipper|
+  :Giao hàng\nPATCH .../status {DELIVERING};
+  :Giao xong tại nhà khách\n(status → DELIVERED);
+else (WALKIN — khách tự lấy)
+  |Khách hàng|
+  :Khách đến tiệm nhận đồ\nPATCH .../status {DELIVERED};
+endif
+
+|Khách hàng|
+if (Phương thức thanh toán?) then (Tiền mặt CASH)
+  :Thanh toán khi nhận đồ\n(COD);
+else (PayOS online)
+  :Thanh toán qua link/PayOS\n(webhook hoặc /pay/:id confirm);
+endif
+
+|Hệ thống (Backend)|
+:Payment status = SUCCESS;\norder.paymentStatus = SUCCESS;\nNotification PAYMENT cho khách;
+
+|Khách hàng|
+if (Đơn đã DELIVERED?) then (có)
+  :Gửi đánh giá\nPOST /orders/:id/review\n(service + shipper rating);
+|Hệ thống (Backend)|
+if (Ràng buộc hợp lệ?) then (có)
+  :Lưu review + hiển thị cho staff;
+else (không)
+  :Trả lỗi (đã review / chưa giao / WALKIN không shipper);
+endif
+else (không)
+endif
+
+stop
+
+@enduml

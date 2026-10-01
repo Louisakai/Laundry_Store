@@ -1,0 +1,89 @@
+@startuml seq-order-placement
+'#################################################
+' NIMBLE — Sequence 1: Tạo đơn + xác nhận + gán shipper
+' DỰA THEO code thực tế: src/order/order.service.ts
+' + src/payment/payment.service.ts
+' + src/websocket/order-tracking.gateway.ts
+'#################################################
+
+skinparam lifelineStrategy solid
+skinparam ParticipantPadding 20
+skinparam BoxPadding 10
+title Luồng 1: Tạo đơn → xác nhận → gán shipper
+
+actor "Khách hàng" as Customer
+participant "App Mobile" as Mobile
+participant "API Backend\n(NestJS)" as Backend
+database "PostgreSQL\n(Supabase)" as DB
+actor "Admin / Staff" as Staff
+
+activate Backend
+
+== 1. Khách tạo đơn ==
+
+Customer -> Mobile: Chọn dịch vụ, địa chỉ, khung giờ
+Mobile -> Backend: POST /orders
+note right
+  dto: orderType, items[] {serviceId},
+  pickup/deliveryAddressId, windows,
+  contact name/phone, notes
+end note
+
+Backend -> Backend: validate DTO (địa chỉ + khung giờ, ≥6h, ≤22h, không quá khứ)
+Backend -> DB: SELECT services (isActive) + snapshot pricePerUnit → orderItems
+note right
+  totalPrice = 0 (tính sau khi cân)
+  ONLINE: tự gán washer khả dụng nhất
+  (isAvailable, mới cập nhật vị trí nhất)
+end note
+Backend -> DB: INSERT orders (status=PENDING, paymentStatus=PENDING, staff_id=washer?)
+Backend -> DB: INSERT order_items (quantity=null, subtotal=null)
+Backend -> DB: INSERT order_tracking_logs (status=PENDING, "Đơn hàng được tạo")
+DB --> Backend: order (kèm orderItems, trackingLogs)
+Backend --> Mobile: 201 { orderId, status: PENDING }
+Mobile --> Customer: "Đơn đã tạo — tổng tiền sẽ tính sau khi cân"
+
+== 2. Staff xác nhận đơn ==
+
+Staff -> Backend: PATCH /orders/:id/status { status: CONFIRMED }
+Backend -> Backend: kiểm tra VALID_TRANSITIONS (PENDING→CONFIRMED) + ORDER_TYPE_FLOWS
+Backend -> DB: UPDATE orders SET status=CONFIRMED
+Backend -> DB: INSERT order_tracking_logs + Notification cho khách
+note right
+  Notification (type=ORDER_STATUS) lưu DB cho khách
+  + emit WebSocket 'order.status-changed'
+  (gateway → room order-{id})
+end note
+DB --> Backend: ok
+Backend --> Staff: 200 { status: CONFIRMED }
+
+== 3. Gán shipper ==
+
+alt Tự động (mặc định, ADMIN bấm auto-assign)
+  Staff -> Backend: POST /orders/:id/auto-assign
+  note right
+    hoặc tự kích hoạt trong updateStatus
+    khi CONFIRMED + ONLINE + chưa có shipper.
+    Ở CONFIRMED + ONLINE còn tự chuyển status
+    sang PICKING_UP + Notification "Shipper đang
+    đến lấy đồ" cho khách.
+    (Gán lúc COMPLETED/DELIVERING thì không đổi status.)
+  end note
+  Backend -> DB: SELECT shipper (isAvailable) → điểm số 0.7*khoảng cách + 0.3*tải
+  Backend -> DB: UPDATE orders SET staff_id=shipper
+  alt CONFIRMED + ONLINE
+    Backend -> DB: UPDATE orders SET status=PICKING_UP + tracking log + Notification "Shipper đang đến lấy đồ"
+  end
+  Backend -> Backend: emit 'order.assigned' (gateway → room staff-{shipperId})
+  Backend --> Staff: 200 { shipper, status: PICKING_UP }
+else Gán thủ công (STAFF/ADMIN)
+  Staff -> Backend: PATCH /orders/:id/assign { staffId }
+  Backend -> Backend: validate staffType=SHIPPER, đơn ở CONFIRMED/COMPLETED/DELIVERING
+  Backend -> DB: UPDATE orders SET staff_id=shipper
+  Backend -> DB: tracking log "Thay washer → shipper"
+  Backend --> Staff: 200 { staff_id: shipper }
+end
+
+deactivate Backend
+
+@enduml
