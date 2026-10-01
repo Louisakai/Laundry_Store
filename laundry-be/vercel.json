@@ -1,0 +1,12 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "installCommand": "npm install",
+  "framework": null,
+  "functions": {
+    "api/main.ts": {
+      "memory": 512,
+      "maxDuration": 30
+    }
+  }
+}

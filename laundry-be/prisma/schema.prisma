@@ -1,0 +1,253 @@
+// ============================================================
+// PRISMA SCHEMA — Hệ thống quản lý giặt ủi tận nơi
+// Stack: NestJS + PostgreSQL (Supabase) + Prisma
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum Role {
+  CUSTOMER
+  STAFF
+  ADMIN
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PICKING_UP
+  RECEIVED
+  PROCESSING
+  COMPLETED
+  DELIVERING
+  DELIVERED
+  CANCELLED
+}
+
+enum PaymentProvider {
+  CASH
+  PAYOS
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+enum NotificationType {
+  ORDER_STATUS
+  PAYMENT
+  PROMOTION
+  SYSTEM
+}
+
+enum OrderType {
+  ONLINE
+  WALKIN
+  DROP_OFF // Khách mang đồ tới tiệm, giao tận nhà
+}
+
+enum StaffType {
+  WASHER
+  SHIPPER
+}
+
+// ============================================================
+// MODELS
+// ============================================================
+
+model User {
+  id                String     @id @default(cuid())
+  email             String     @unique
+  passwordHash      String
+  fullName          String
+  phone             String
+  role              Role       @default(CUSTOMER)
+  staffType         StaffType? // nullable - chỉ dùng cho STAFF
+  preferences       Json?      // Sở thích: nước giặt, gấp đồ... (CUSTOMER)
+  workZone          String?    // Khu vực phụ trách (STAFF)
+  isAvailable       Boolean?   @default(true) // FIX: nullable - chỉ có nghĩa với STAFF
+  currentLat        Float?     // Vĩ độ real-time (STAFF)
+  currentLng        Float?     // Kinh độ real-time (STAFF)
+  locationUpdatedAt DateTime?
+  created_at        DateTime   @default(now())
+  updated_at        DateTime   @updatedAt
+
+  // Relations
+  addresses         Address[]
+  ordersAsCustomer  Order[]            @relation("CustomerOrders")
+  ordersAsStaff     Order[]            @relation("StaffOrders")
+  orderTrackingLogs OrderTrackingLog[]
+  reviewsAsCustomer Review[]           @relation("CustomerReviews")
+  reviewsAsStaff    Review[]           @relation("StaffReviews")
+  notifications     Notification[]     // FIX: thiếu quan hệ ngược, Prisma sẽ lỗi nếu không có
+
+  @@map("users")
+}
+
+model Address {
+  id          String   @id @default(cuid())
+  user_id     String
+  label       String   // "Nhà riêng", "Cơ quan"
+  addressLine String
+  latitude    Float
+  longitude   Float
+  isDefault   Boolean  @default(false)
+  created_at  DateTime @default(now())
+
+  // Relations
+  user             User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  ordersAsPickup   Order[] @relation("PickupAddress")
+  ordersAsDelivery Order[] @relation("DeliveryAddress")
+
+  @@map("addresses")
+}
+
+model Service {
+  id           String   @id @default(cuid())
+  name         String
+  description  String?
+  pricePerUnit Float
+  unit         String   // "kg", "cái", "đôi"
+  isActive     Boolean  @default(true)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  // Relations
+  orderItems OrderItem[]
+
+  @@map("services")
+}
+
+model Order {
+  id                    String          @id @default(cuid())
+  customer_id           String
+  staff_id              String?
+  pickup_address_id     String?         // FIX: nullable - WALKIN không cần
+  delivery_address_id   String?         // FIX: nullable - WALKIN không cần
+  status                OrderStatus     @default(PENDING)
+  totalPrice            Float           @default(0)
+  orderType             OrderType
+  notes                 String?
+  pickupWindowStart     DateTime?       // FIX: nullable - WALKIN không cần
+  pickupWindowEnd       DateTime?       // FIX: nullable - WALKIN không cần
+  deliveryWindowStart   DateTime?
+  deliveryWindowEnd     DateTime?
+  pickupContactName     String?
+  pickupContactPhone    String?
+  deliveryContactName   String?
+  deliveryContactPhone  String?
+  cancellationReason    String?         // Bổ sung theo thiết kế đã chốt
+  paymentMethod         PaymentProvider @default(CASH)
+  paymentStatus         PaymentStatus   @default(PENDING)
+  created_at            DateTime        @default(now())
+  updated_at            DateTime        @updatedAt
+
+  // Relations
+  customer        User               @relation("CustomerOrders", fields: [customer_id], references: [id])
+  staff            User?              @relation("StaffOrders", fields: [staff_id], references: [id])
+  pickupAddress    Address?           @relation("PickupAddress", fields: [pickup_address_id], references: [id])
+  deliveryAddress  Address?           @relation("DeliveryAddress", fields: [delivery_address_id], references: [id])
+  orderItems       OrderItem[]
+  trackingLogs     OrderTrackingLog[]
+  payments         Payment[]
+  review           Review?
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id         String   @id @default(cuid())
+  order_id   String
+  service_id String
+  quantity   Float?   // FIX: nullable - ONLINE điền sau khi cân
+  price      Float    // Snapshot giá từ Service
+  subtotal   Float?   // FIX: nullable - tính sau khi có quantity
+  created_at DateTime @default(now())
+
+  // Relations
+  order   Order   @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  service Service @relation(fields: [service_id], references: [id], onDelete: Restrict)
+
+  @@map("order_items")
+}
+
+model OrderTrackingLog {
+  id         String      @id @default(cuid())
+  order_id   String
+  changed_by String      // Ai cập nhật (staff/admin)
+  status     OrderStatus
+  note       String?     // Lời nhắn hiển thị cho khách
+  created_at DateTime    @default(now())
+
+  // Relations
+  order Order @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [changed_by], references: [id])
+
+  @@map("order_tracking_logs")
+}
+
+model Review {
+  id             String   @id @default(cuid())
+  order_id       String   @unique // Quan hệ 1-1 với Order
+  customer_id    String
+  staff_id       String?
+  serviceRating  Int      // Thang điểm 1-5
+  serviceComment String?
+  shipperRating  Int?     // nullable - WALKIN không có shipper
+  shipperComment String?
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  // Relations
+  order    Order @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  customer User  @relation("CustomerReviews", fields: [customer_id], references: [id])
+  staff    User? @relation("StaffReviews", fields: [staff_id], references: [id])
+
+  @@map("reviews")
+}
+
+model Notification {
+  id         String           @id @default(cuid())
+  user_id    String
+  title      String
+  content    String
+  isRead     Boolean          @default(false)
+  type       NotificationType
+  relatedId  String?          // orderId để FE redirect
+  created_at DateTime         @default(now())
+
+  // Relations
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model Payment {
+  id              String          @id @default(cuid())
+  order_id        String
+  provider        PaymentProvider
+  amount          Float
+  status          PaymentStatus   @default(PENDING)
+  providerRef     String?         @unique
+  providerPayload Json?
+  paidAt          DateTime?
+  created_at      DateTime        @default(now())
+  updated_at      DateTime        @updatedAt
+
+  // Relations
+  order Order @relation(fields: [order_id], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
