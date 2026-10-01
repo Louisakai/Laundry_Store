@@ -56,3 +56,7 @@ Thumbs.db
 .cache/
 tmp/
 temp/
+
+# Repository-only assistant files and project notes
+.agents/
+docs/
